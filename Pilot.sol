@@ -52,7 +52,12 @@ contract Pilot is ERC20Burnable, Ownable {
         _mint(_otherToolAddr, MAX_SUPPLY.mul(20).div(100));
     }
 
-    function setAddrs(address _lpBonusAddr, address _marketAddr, address _fundAddr) external onlyOwner {
+    function setFeeAddrs(address _lpBonusAddr, address _marketAddr, address _fundAddr) external onlyOwner {
+        require(
+            _lpBonusAddr != address(0) &&
+            _marketAddr != address(0) &&
+            _fundAddr != address(0)
+        );
         lpBonusAddr = _lpBonusAddr;
         marketAddr = _marketAddr;
         fundAddr = _fundAddr;
@@ -71,6 +76,7 @@ contract Pilot is ERC20Burnable, Ownable {
     }
 
     function multiTransfer(address[] memory receivers, uint256[] memory amounts) external {
+        require(receivers.length == amounts.length, "The length of receivers and amounts is not matched");
         for (uint256 i = 0; i < receivers.length; i++) {
             transfer(receivers[i], amounts[i]);
         }
@@ -78,20 +84,27 @@ contract Pilot is ERC20Burnable, Ownable {
 
     function _transfer(address sender, address recipient, uint256 amount) internal override virtual {
         require(amount > 0, "Transfer amount must be greater than zero");
+        require(amount <= balanceOf(sender), "ERC20: transfer amount exceeds balance");
+
         if(!_isExcludedFromFee[sender] && !_isExcludedFromFee[recipient]) {
-            super._transfer(sender, lpBonusAddr, amount.mul(lpBonusFee).div(100));
+            uint lpBonusAmount = amount.mul(lpBonusFee).div(100);
+            uint marketAmount = amount.mul(marketFee).div(100);
+            uint burnAmount = amount.mul(burnFee).div(100);
+            uint fundFeeAmount = amount.mul(fundFee).div(100);
+
             if(totalSupply() <= MIN_SUPPLY) {
-                super._transfer(sender, marketAddr, amount.mul(marketFee.add(burnFee)).div(100));
+                super._transfer(sender, marketAddr, marketAmount.add(burnAmount));
             } else {
-                super._transfer(sender, marketAddr, amount.mul(marketFee).div(100));
-                uint burnAmount = amount.mul(burnFee).div(100);
+                super._transfer(sender, marketAddr, marketAmount);
                 if(totalSupply().sub(burnAmount) < MIN_SUPPLY) {
                     burnAmount = totalSupply().sub(MIN_SUPPLY);
                 }
                 _burn(sender, burnAmount);
             }
-            super._transfer(sender, fundAddr, amount.mul(fundFee).div(100));
-            super._transfer(sender, recipient, amount.mul(90).div(100));
+            super._transfer(sender, lpBonusAddr, lpBonusAmount);
+            super._transfer(sender, fundAddr, fundFeeAmount);
+            uint transferTokenAmount = amount.sub(lpBonusAmount).sub(marketAmount).sub(burnAmount).sub(fundFeeAmount);
+            super._transfer(sender, recipient, transferTokenAmount);
         } else {
             super._transfer(sender, recipient, amount);
         }
